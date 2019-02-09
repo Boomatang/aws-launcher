@@ -8,17 +8,62 @@ def get_tag_value(tags, name):
             return tag['Value']
     return None
 
+def create_tag(key, value):
+    output = {
+            'Key': key,
+            'Value': value
+            }
+    return output
+
 @click.group()
 def cli():
     '''Get extra help on commands by COMMAND --help'''
     pass
 
 @click.command()
-@click.option('--name', help="Name of instance")
-@click.option('--group', envvar='GROUP', help="Group the instance belongs too.")
-def create(name, group):
-    click.echo(f'Create EC2 instance, {name}')
-    click.echo(group)
+@click.option('--name', '-n', help="Name of instance")
+@click.option('--group', '-g', envvar='GROUP', help="Group the instance belongs too.")
+@click.option('--max_count', default=1, help="Max count of instances")
+@click.option('--min_count', default=1, help="Min count of instances")
+@click.option('--key_name', '-k', envvar='KEYNAME', help="Key name used for SSH")
+@click.option('--security_group', '-s', envvar='SECURITYGROUP', multiple=True, help="List of security groups to be assigned to the instances")
+def create(name, group, max_count, min_count, key_name, security_group):
+    '''Create an EC2 instance'''
+    click.echo(f'Create EC2 instance, {name} in group {group}')
+    
+    tag_specifications = {
+            'ResourceType': 'instance',
+            'Tags': []
+            }
+
+    if name is not None:
+        tag = create_tag('Name', name)
+        tag_specifications['Tags'].append(tag)
+
+    if group is not None:
+        tag = create_tag('Group', group)
+        tag_specifications['Tags'].append(tag)
+    
+    TagSpecifications = [tag_specifications,]
+    config = {
+            'ImageId': 'ami-0fad7378adf284ce0',
+            'MinCount': min_count,
+            'MaxCount': max_count,
+            'InstanceType': 't2.micro',
+            'TagSpecifications': TagSpecifications
+            }
+
+    if key_name is not None:
+        config['KeyName'] = key_name
+
+    if len(security_group) > 0:
+        config['SecurityGroups'] = security_group
+
+    ec2 = boto3.resource('ec2')
+    instance = ec2.create_instances(**config)
+            
+    result = f"Created EC2 instance.\n\tID: {instance[0].id}\n\tCurrent State: {instance[0].state['Name']}"
+    click.echo(result)
 
 @click.command()
 def webserver():
@@ -49,7 +94,10 @@ def destroy(group, all):
                 )
  
     for i in instances:
-        name = get_tag_value(i.tags, 'Name')
+        try:
+            name = get_tag_value(i.tags, 'Name')
+        except TypeError:
+            name = "Undefined"
         try:
             click.echo(f'Termainating {name}')
             i.terminate()
