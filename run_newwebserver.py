@@ -189,6 +189,15 @@ cli.add_command(status)
 
 # ------------ Working with S3 -----------------
 
+def item_counter(bucket):
+    """Counts the number of items in a bucket"""
+    count = 0
+
+    for _ in bucket.objects.all():
+        count += 1
+
+    return count
+
 
 @click.command()
 @click.argument('name', required=True)
@@ -216,6 +225,31 @@ def remove_bucket():
 def list_buckets():
     """Lists all the buckets that the user has access too."""
 
+    click.echo("Listing buckets")
+
+    s3 = boto3.resource('s3')
+
+    error_count = 0
+
+    for bucket in s3.buckets.all():
+        try:
+            name = bucket.name
+            item_count = item_counter(bucket)
+
+            result = f'\n' \
+                f'\tBucket: {name}\n' \
+                f'\tNo. of Items: {item_count}\n'
+
+            click.echo(result)
+
+        except Exception as error:
+            error_count += 1
+
+    if error_count:
+        braker = '*'*18
+        message = f'\t{braker}\n\t{error_count} errors happened.\n\t{braker}'
+
+        click.echo(message)
 
 cli.add_command(bucket)
 cli.add_command(add_file)
