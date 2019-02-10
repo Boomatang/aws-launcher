@@ -189,6 +189,7 @@ cli.add_command(status)
 
 # ------------ Working with S3 -----------------
 
+
 def item_counter(bucket):
     """Counts the number of items in a bucket"""
     count = 0
@@ -233,11 +234,27 @@ def add_file():
 
 
 @click.command()
-@click.argument('bucket', required=True)
-@click.option('--empty', help='Removes contains of bucket before removing bucket')
+@click.option('-n', '--name', required=True, help="Name of bucket to be deleted")
+@click.option('-e', '--empty-bucket', 'empty', is_flag=True, help='Removes contains of bucket before removing bucket')
 @click.confirmation_option(prompt="Remove S3 bucket...")
-def remove_bucket():
-    """Removes a S3 bucket"""
+def delete_bucket(name, empty):
+    """Deletes a S3 bucket"""
+
+    s3 = boto3.client('s3')
+
+    if empty:
+        bucket = boto3.resource('s3').Bucket(name)
+        for key in bucket.objects.all():
+            response = key.delete()
+
+    try:
+        s3.delete_bucket(Bucket=name)
+        click.echo(f'Bucket {name} has been deleted')
+    except s3.exceptions.NoSuchBucket as error:
+        click.echo(f"No such bucket called {name}")
+    except s3.exceptions.ClientError as error:
+        click.echo(error)
+        click.echo(f'Please see --help for more help')
 
 
 @click.command()
@@ -274,7 +291,7 @@ def list_buckets():
 
 cli.add_command(bucket)
 cli.add_command(add_file)
-cli.add_command(remove_bucket)
+cli.add_command(delete_bucket)
 cli.add_command(list_buckets)
 
 if __name__ == '__main__':
