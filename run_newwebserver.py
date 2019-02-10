@@ -1,6 +1,6 @@
 import click
 import boto3
-
+import botocore
 
 # ------------ Working with EC2 -----------------
 
@@ -200,10 +200,29 @@ def item_counter(bucket):
 
 
 @click.command()
-@click.argument('name', required=True)
-def bucket():
+@click.option('-n', '--name', required=True, help="Name of bucket, should be a globally unique name.")
+@click.option('-l', '--location', default='eu-west-1', show_default=True, help="Sets location to deploy the bucket")
+def bucket(name, location):
     """Create a S3 bucket.\n
-    NAME of bucket, should be globally unique name."""
+    """
+    s3 = boto3.client('s3')
+
+    config = {
+        'Bucket': name,
+        'CreateBucketConfiguration': {
+            'LocationConstraint': location
+        }
+    }
+    try:
+        response = s3.create_bucket(**config)
+
+        print(response)
+
+    except s3.exceptions.BucketAlreadyExists as error:
+        click.echo(f'Bucket name <{name}> already exists')
+
+    except s3.exceptions.ClientError as error:
+        click.echo('There is an error with the name used.')
 
 
 @click.command()
@@ -244,12 +263,14 @@ def list_buckets():
 
         except Exception as error:
             error_count += 1
+            # print(error)
 
     if error_count:
         braker = '*'*18
         message = f'\t{braker}\n\t{error_count} errors happened.\n\t{braker}'
 
         click.echo(message)
+
 
 cli.add_command(bucket)
 cli.add_command(add_file)
