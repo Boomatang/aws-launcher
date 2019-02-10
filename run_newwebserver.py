@@ -203,7 +203,8 @@ def item_counter(bucket):
 @click.command()
 @click.option('-n', '--name', required=True, help="Name of bucket, should be a globally unique name.")
 @click.option('-l', '--location', default='eu-west-1', show_default=True, help="Sets location to deploy the bucket")
-def bucket(name, location):
+@click.option('--public-read', 'public_read', is_flag=True, help="Set bucket to have public reads")
+def bucket(name, location, public_read):
     """Create a S3 bucket.\n
     """
     s3 = boto3.client('s3')
@@ -212,25 +213,53 @@ def bucket(name, location):
         'Bucket': name,
         'CreateBucketConfiguration': {
             'LocationConstraint': location
-        }
+        },
     }
+
+    if public_read:
+        config['ACL'] = 'public-read'
+
     try:
         response = s3.create_bucket(**config)
 
-        print(response)
+        click.echo("Your bucket has been created")
+        # print(response)
 
     except s3.exceptions.BucketAlreadyExists as error:
         click.echo(f'Bucket name <{name}> already exists')
 
     except s3.exceptions.ClientError as error:
-        click.echo('There is an error with the name used.')
+        print(error)
 
 
 @click.command()
-@click.argument('bucket', required=True)
-@click.argument('filename', required=True, type=click.File('r'))
-def add_file():
+@click.option('-b', '--bucket', required=True, help="Bucket to store the file in.")
+@click.option('-f', '--file-name', 'filename', required=True, help="Name of file to uploaded")
+@click.option('--public-read', 'public_read', is_flag=True, help="Allows public read of file")
+def add_file(filename, bucket, public_read):
     """Upload a give file to stated S3 bucket"""
+
+    client = boto3.client('s3')
+
+    config = {
+        'Bucket': bucket,
+        'Key': filename
+    }
+    try:
+        with open(filename, 'rb') as f:
+            config['Body'] = f.read()
+    except FileNotFoundError as error:
+        click.echo(error)
+
+    if public_read:
+        config['ACL'] = 'public-read'
+
+    if 'Body' in config.keys():
+        try:
+            client.put_object(**config)
+            click.echo(f"File has been uploaded to S3 bucket {bucket}")
+        except Exception as error:
+            print(error)
 
 
 @click.command()
@@ -243,9 +272,14 @@ def delete_bucket(name, empty):
     s3 = boto3.client('s3')
 
     if empty:
-        bucket = boto3.resource('s3').Bucket(name)
-        for key in bucket.objects.all():
-            response = key.delete()
+        try:
+            bucket = boto3.resource('s3').Bucket(name)
+            for key in bucket.objects.all():
+                response = key.delete()
+            click.echo("Bucket contains have been removed.")
+        except s3.exceptions.NoSuchBucket as error:
+            click.echo(f"No such bucket called {name}")
+            return
 
     try:
         s3.delete_bucket(Bucket=name)
@@ -283,8 +317,8 @@ def list_buckets():
             # print(error)
 
     if error_count:
-        braker = '*'*18
-        message = f'\t{braker}\n\t{error_count} errors happened.\n\t{braker}'
+        line_brake = '*'*18
+        message = f'\t{line_brake}\n\t{error_count} errors happened.\n\t{line_brake}'
 
         click.echo(message)
 
