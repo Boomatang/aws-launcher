@@ -187,5 +187,40 @@ cli.add_command(webserver)
 cli.add_command(destroy)
 cli.add_command(status)
 
+# ------------ Working with S3 -----------------
+
+
+@click.command()
+@click.argument('name', required=True)
+def bucket():
+    """Create a S3 bucket.\n
+    NAME of bucket, should be globally unique name."""
+
+
+@click.command()
+@click.argument('bucket', required=True)
+@click.argument('filename', required=True, type=click.File('r'))
+def add_file():
+    """Upload a give file to stated S3 bucket"""
+
+
+@click.command()
+@click.argument('bucket', required=True)
+@click.option('--empty', help='Removes contains of bucket before removing bucket')
+@click.confirmation_option(prompt="Remove S3 bucket...")
+def remove_bucket():
+    """Removes a S3 bucket"""
+
+
+@click.command()
+def list_buckets():
+    """Lists all the buckets that the user has access too."""
+
+
+cli.add_command(bucket)
+cli.add_command(add_file)
+cli.add_command(remove_bucket)
+cli.add_command(list_buckets)
+
 if __name__ == '__main__':
     cli()
