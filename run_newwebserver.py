@@ -1,6 +1,17 @@
 import click
 import boto3
 import botocore
+import sys
+
+# ------------ Setting up the logging -----------
+from loguru import logger
+
+logger.add("info.log", rotation="10 MB", format="{time:YYYY-MM-DD at HH:mm:ss} | {level} | {message}", level='INFO')
+logger.add("errors.log", rotation="10 MB", format="{time:YYYY-MM-DD at HH:mm:ss} | {level} | {message}")
+# Remove the logging print out to standard error
+# logger.remove(0)
+
+# logger.add(sys.stdout, format="<green>{time}</green> | <level>{message}</level>")
 
 # ------------ Working with EC2 -----------------
 
@@ -21,8 +32,10 @@ def create_tag(key, value):
 
 
 @click.group()
+@logger.catch
 def cli():
     """Get extra help on commands by COMMAND --help"""
+    logger.info('App started')
     pass
 
 
@@ -36,7 +49,9 @@ def cli():
               help="List of security groups to be assigned to the instances")
 def create(name, group, max_count, min_count, key_name, security_group):
     """Create an EC2 instance"""
-    click.echo(f'Create EC2 instance, {name} in group {group}')
+    message = f'Create EC2 instance, {name} in group {group}'
+    click.echo(message)
+    logger.info(message)
 
     tag_specifications = {
         'ResourceType': 'instance',
@@ -52,10 +67,14 @@ def create(name, group, max_count, min_count, key_name, security_group):
     if name is not None:
         tag = create_tag('Name', name)
         tag_specifications['Tags'].append(tag)
+    else:
+        logger.degug("No tag Name was set")
 
     if group is not None:
         tag = create_tag('Group', group)
         tag_specifications['Tags'].append(tag)
+    else:
+        logger.dedug('No Group tag was set')
 
     TagSpecifications = [tag_specifications, ]
     config = {
@@ -69,16 +88,20 @@ def create(name, group, max_count, min_count, key_name, security_group):
 
     if key_name is not None:
         config['KeyName'] = key_name
+    else:
+        logger.degug("No KeyName was set")
 
     if len(security_group) > 0:
         config['SecurityGroups'] = security_group
+    else:
+        logger.degug("No Security Grounp was set")
 
     ec2 = boto3.resource('ec2')
     instance = ec2.create_instances(**config)
 
     result = f"Created EC2 instance.\n\tID: {instance[0].id}\n\tCurrent State: {instance[0].state['Name']}"
     click.echo(result)
-
+    logger.info(result)
 
 @click.command()
 def webserver():
@@ -91,6 +114,8 @@ def webserver():
 @click.option('-a', '--all', is_flag=True, help="Select all instances. Protected instances will not be terminated")
 def destroy(group, all):
     """Terminate EC2 instances"""
+    logger.info('Destroy function called')
+
     click.echo('Terminates an instance')
     ec2 = boto3.resource('ec2')
     if all:
@@ -110,11 +135,13 @@ def destroy(group, all):
             name = get_tag_value(i.tags, 'Name')
         except TypeError:
             name = "Undefined"
+            logger.exception('Type Error : No tag Name')
         try:
             click.echo(f'Terminating {name}')
             i.terminate()
         except Exception as err:
             click.echo(f'Issue terminating {name}')
+            logger.exception('Destroy Exception')
 
 
 @click.command()
@@ -123,7 +150,7 @@ def destroy(group, all):
 @click.option('--all', '-a', is_flag=True, help="Get status of all instances")
 def status(name, group, all):
     """Gets the status of existing EC2 instances"""
-
+    logger.info('Status function called')
     ec2 = boto3.resource('ec2')
     instances = None
     if all:
@@ -205,8 +232,10 @@ def item_counter(bucket):
 @click.option('-l', '--location', default='eu-west-1', show_default=True, help="Sets location to deploy the bucket")
 @click.option('--public-read', 'public_read', is_flag=True, help="Set bucket to have public reads")
 def bucket(name, location, public_read):
-    """Create a S3 bucket.\n
+    """Create a S3 bucket.
     """
+    logger.info('Create bucket function called')
+
     s3 = boto3.client('s3')
 
     config = {
@@ -227,9 +256,10 @@ def bucket(name, location, public_read):
 
     except s3.exceptions.BucketAlreadyExists as error:
         click.echo(f'Bucket name <{name}> already exists')
-
+        logger.excetion('Bucket Already Exists')
     except s3.exceptions.ClientError as error:
         print(error)
+        logger.excetion('Unknown Error')
 
 
 @click.command()
@@ -238,7 +268,7 @@ def bucket(name, location, public_read):
 @click.option('--public-read', 'public_read', is_flag=True, help="Allows public read of file")
 def add_file(filename, bucket, public_read):
     """Upload a give file to stated S3 bucket"""
-
+    logger.info('Add file to bucket')
     client = boto3.client('s3')
 
     config = {
@@ -250,15 +280,18 @@ def add_file(filename, bucket, public_read):
             config['Body'] = f.read()
     except FileNotFoundError as error:
         click.echo(error)
+        logger.exection('No file found')
 
     if public_read:
         config['ACL'] = 'public-read'
+        logger.debug('ACL set to public read')
 
     if 'Body' in config.keys():
         try:
             client.put_object(**config)
             click.echo(f"File has been uploaded to S3 bucket {bucket}")
         except Exception as error:
+            logger.exection('Error uploading')
             print(error)
 
 
@@ -268,7 +301,7 @@ def add_file(filename, bucket, public_read):
 @click.confirmation_option(prompt="Remove S3 bucket...")
 def delete_bucket(name, empty):
     """Deletes a S3 bucket"""
-
+    logger.info('Delete bucket function called')
     s3 = boto3.client('s3')
 
     if empty:
@@ -279,6 +312,7 @@ def delete_bucket(name, empty):
             click.echo("Bucket contains have been removed.")
         except s3.exceptions.NoSuchBucket as error:
             click.echo(f"No such bucket called {name}")
+            logger.excetion("No Such Bucket ({name}) found")
             return
 
     try:
@@ -286,15 +320,16 @@ def delete_bucket(name, empty):
         click.echo(f'Bucket {name} has been deleted')
     except s3.exceptions.NoSuchBucket as error:
         click.echo(f"No such bucket called {name}")
+        logger.excetion("No Such Bucket ({name}) found")
     except s3.exceptions.ClientError as error:
-        click.echo(error)
+        logger.excetion("A Client Error happened")
         click.echo(f'Please see --help for more help')
 
 
 @click.command()
 def list_buckets():
     """Lists all the buckets that the user has access too."""
-
+    logger.info("Listing all buckets function called")
     click.echo("Listing buckets")
 
     s3 = boto3.resource('s3')
@@ -315,11 +350,14 @@ def list_buckets():
         except Exception as error:
             error_count += 1
             # print(error)
+            # logger adds a lot of information that is not helpfuly
+            # logger.exception("Error reading bucket {bucket}")
+            logger.error("Error reading bucket")
 
     if error_count:
         line_brake = '*'*18
         message = f'\t{line_brake}\n\t{error_count} errors happened.\n\t{line_brake}'
-
+        logger.debug(message)
         click.echo(message)
 
 
