@@ -1,3 +1,6 @@
+import os
+import subprocess
+from pathlib import Path
 import click
 import boto3
 import botocore
@@ -14,6 +17,7 @@ logger.add("errors.log", rotation="10 MB", format="{time:YYYY-MM-DD at HH:mm:ss}
 # logger.add(sys.stdout, format="<green>{time}</green> | <level>{message}</level>")
 
 # ------------ Working with EC2 -----------------
+
 
 def get_tag_value(tags, name):
     '''Get a tag value from a list of tags'''
@@ -102,10 +106,6 @@ def create(name, group, max_count, min_count, key_name, security_group):
     result = f"Created EC2 instance.\n\tID: {instance[0].id}\n\tCurrent State: {instance[0].state['Name']}"
     click.echo(result)
     logger.info(result)
-
-@click.command()
-def webserver():
-    click.echo('Deploys the web server script')
 
 
 @click.command()
@@ -210,9 +210,114 @@ def status(name, group, all):
 
 
 cli.add_command(create)
-cli.add_command(webserver)
 cli.add_command(destroy)
 cli.add_command(status)
+
+# ------------ Working with web server-----------------
+
+
+def get_instances(instances):
+    """
+    Gets the instances of a machine
+    :param instances: String Id of machine
+    :return: boto3.instance
+    """
+    logger.info("Getting machine instance (Function call)")
+    ec2 = boto3.resource('ec2')
+    instance = ec2.Instance(instances)
+
+    return instance
+
+
+def get_key_pair_path(key_path, key_pair):
+    extension = '.pem'
+
+    key = Path(key_path, key_pair + extension)
+
+    if key.is_file():
+        return str(key)
+    else:
+        raise FileNotFoundError
+
+
+def install_python37(key, ip):
+    """Install python3.7"""
+    actions = ['sudo yum update -y', 'sudo yum install -y python37']
+
+    base_command = f"ssh -t -o StrictHostKeyChecking=no -i {key} ec2-user@{ip} \'"
+
+    click.echo("Updating and installing python")
+    logger.info(f"Updating and installing python on {ip}")
+    for action in actions:
+        command = base_command + action + "\'"
+
+        response = subprocess.run(command, shell=True)
+        print(response)
+
+
+def copy_file_to_server(key, ip):
+    """Copy the check_webserver.py to server"""
+
+    command = f"scp -i {key} check_webserver.py ec2-user@{ip}:. "
+
+    click.echo("Coping check_webserver.py to server")
+    logger.info(f"Coping check_webserver.py to {ip}")
+    response = subprocess.run(command, shell=True)
+    print(response)
+
+
+@click.command()
+@click.option('-i', '--id', 'machine', required=True, help='The Id number for the machine where the server is deployed')
+def check_web_server(machine):
+    """
+    Checks if httpd is running on the server.
+    If there is no test script this is copied to the server.
+    :return:
+    """
+    logger.info("Web server been checked")
+
+    click.echo('Deploys the web server script')
+
+    # get machine instances
+    instance = get_instances(machine)
+
+    # get instances public ip
+    ip = instance.public_ip_address
+
+    # get instances key pair
+    key_pair = instance.key_name
+
+    # get standard key pair location
+    key_path = os.environ.get('KEYLOCATION')
+    if key_path is None:
+        click.echo('System variable most be set : KEYLOCATION')
+        logger.debug('No KEYLOCATION variable set')
+
+    key_pair_path = get_key_pair_path(key_path, key_pair)
+
+    # try run web server checker
+    command = f"ssh -t -o StrictHostKeyChecking=no -i {key_pair_path} ec2-user@{ip} \'python3 check_webserver.py\'"
+
+    tries = 3
+    logger.debug(command)
+    while tries > 0:
+        status = subprocess.run(command, shell=True)
+        if status.returncode == 0:
+            break
+
+        if status.returncode == 127:
+            install_python37(key_pair_path, ip)
+
+        if status.returncode == 2:
+            copy_file_to_server(key_pair_path, ip)
+
+        tries -= 1
+    else:
+        click.echo("Unknown issue with checking server")
+        logger.debug("Checking server timed out on tries. Unknown reason")
+
+
+cli.add_command(check_web_server)
 
 # ------------ Working with S3 -----------------
 
