@@ -255,13 +255,14 @@ def install_python37(key, ip):
         print(response)
 
 
-def copy_file_to_server(key, ip):
-    """Copy the check_webserver.py to server"""
+def copy_file_to_server(key, ip, filename="check_webserver.py"):
+    """Copy a file to the server"""
 
-    command = f"scp -i {key} check_webserver.py ec2-user@{ip}:. "
+    command = f"scp -i {key} {filename} ec2-user@{ip}:/home/ec2-user "
+    print(command)
 
-    click.echo("Coping check_webserver.py to server")
-    logger.info(f"Coping check_webserver.py to {ip}")
+    click.echo(f"Coping {filename} to server")
+    logger.info(f"Coping {filename} to {ip}")
     response = subprocess.run(command, shell=True)
     print(response)
 
@@ -317,7 +318,83 @@ def check_web_server(machine):
         logger.debug("Checking server timed out on tries. Unknown reason")
 
 
+def create_index_file(image_details):
+    """Creates a index.html file on the locale disc to be copied up to the server"""
+
+    data = f'''
+    <html>
+    <head>
+    <title>Sample Index Page</title>
+    </head>
+    <body>
+    <img src="{image_details}">
+    </body>
+    </html>
+    '''
+
+    with open('index.html', 'w+') as f:
+        f.write(data)
+
+
+def move_file(key_pair_path, ip, filename, src, dst):
+    """Moves a file a server to a different location """
+
+    command = f"ssh -t -o StrictHostKeyChecking=no -i {key_pair_path} ec2-user@{ip} \'sudo mv {filename} {dst}\'"
+
+    print(command)
+    subprocess.run(command, shell=True)
+    click.echo(f'{filename} has been place in {dst}.')
+
+
+@click.command()
+@click.option('-i', '--image', required=True, help="Image file to be uploaded")
+@click.option('-s', '--server-id', 'server', required=True, help="Server Id that the image is to be shown on")
+@click.option('-b', '--bucket', 'bin', required=True, help="Bucket to where the image is to be loaded")
+def add_image(image, server, bin):
+    """Adds a image a S3 bucket and creates an index page on the server to display the image \f"""
+    logger.info("Add image to web server to be displayed")
+
+    response = _add_file(filename=image, bucket=bin, public_read=True)
+
+    if response:
+        image_path = f"https://s3-eu-west-1.amazonaws.com/{bin}/{image}"
+        create_index_file(image_path)
+
+        # TODO this should be refactored, its copied and pasted from above
+        instance = get_instances(server)
+
+        # get instances public ip
+        ip = instance.public_ip_address
+
+        # get instances key pair
+        key_pair = instance.key_name
+
+        # get standard key pair location
+        key_path = os.environ.get('KEYLOCATION')
+        if key_path is None:
+            click.echo('System variable most be set : KEYLOCATION')
+            logger.debug('No KEYLOCATION variable set')
+
+        key_pair_path = get_key_pair_path(key_path, key_pair)
+        copy_file_to_server(key_pair_path, ip, filename='index.html')
+
+        config = {
+            'key_pair_path': key_pair_path,
+            'ip': ip,
+            'filename': 'index.html',
+            'dst': '/var/www/html/index.html',
+            'src': '.'
+            }
+        move_file(**config)
+
+        # get the server ip address
+        # create the html file
+        # copy file to server
+        # launch web browser
+
+
 cli.add_command(check_web_server)
+cli.add_command(add_image)
 
 # ------------ Working with S3 -----------------
 
@@ -374,6 +451,16 @@ def bucket(name, location, public_read):
 def add_file(filename, bucket, public_read):
     """Upload a give file to stated S3 bucket"""
     logger.info('Add file to bucket')
+
+    if public_read:
+        access = True
+    else:
+        access = False
+
+    _add_file(filename, bucket, public_read=access)
+
+
+def _add_file(filename, bucket, public_read):
     client = boto3.client('s3')
 
     config = {
@@ -395,9 +482,13 @@ def add_file(filename, bucket, public_read):
         try:
             client.put_object(**config)
             click.echo(f"File has been uploaded to S3 bucket {bucket}")
+            return True
         except Exception as error:
             logger.exection('Error uploading')
             print(error)
+            return False
+    else:
+        return False
 
 
 @click.command()
